@@ -18,12 +18,26 @@ I2Sound I2Sound0(0);
 
 
 // ------------------------------------------------------------
-// these are wrappers for the default I2S ISRs, this allows
-// the definition of custom callback functions for interrupts.
-// callbacks must not have any arguments and return void
+// wrapper for the default I2S receive ISR, this allows
+// the definition of a custom callback function for interrupts.
+// the callback must not have any arguments and return void.
+// read() populates provided memory addresses with audio data
 // ------------------------------------------------------------
-void i2s0_rx_isr() { I2Sound0.rxISR(); }
-void i2s0_tx_isr() { I2Sound0.txISR(); }
+void i2s0_rx_isr() {
+  I2Sound0.read();
+  I2Sound0.rxISR();
+}
+
+
+
+// ------------------------------------------------------------
+// wrapper for the default I2S transmit ISR, this allows
+// the definition of a custom callback function for interrupts.
+// the callback must not have any arguments and return void.
+// ------------------------------------------------------------
+void i2s0_tx_isr() {
+  I2Sound0.txISR();
+}
 
 
 
@@ -44,6 +58,7 @@ I2Sound::I2Sound(uint8_t newID) : myID(newID) {
     I2S_RCR4 = &I2S0_RCR4;
     I2S_RCR5 = &I2S0_RCR5;
     I2S_RCSR = &I2S0_RCSR;
+    I2S_RDR0 = &I2S0_RDR0;
     IRQ_I2S_RX = IRQ_I2S0_RX;
     IRQ_I2S_TX = IRQ_I2S0_TX;
   }
@@ -146,9 +161,12 @@ void I2Sound::init(uint8_t newChans, uint8_t newBits) {
 // passed the name of a user-defined callback funtion to execute
 // when an RX interrupt is generated. the callback function
 // must take no args and return void. enables RX interrupts.
+// also passed pointers to where the audio data will be stored
 // ------------------------------------------------------------
-void I2Sound::start_rx(void (*new_rxISR)()) {
+void I2Sound::start_rx(void (*new_rxISR)(), uint32_t* ch0, uint32_t* ch1) {
   rxISR = new_rxISR;
+  rx_ch0 = ch0;
+  rx_ch1 = ch1;
   NVIC_ENABLE_IRQ(IRQ_I2S_RX);
 }
 
@@ -181,6 +199,21 @@ void I2Sound::stop_rx() {
 // ------------------------------------------------------------
 void I2Sound::stop_tx() {
   NVIC_DISABLE_IRQ(IRQ_I2S_TX);
+}
+
+
+
+// ------------------------------------------------------------
+// perform a read of two words of data from the top of the FIFO.
+// I'm not entirely sure why there needs to be a dummy read in-
+// between the two legitimate reads, but there does. once data
+// has been read, clear the FIFO for the next time around
+// ------------------------------------------------------------
+void I2Sound::read() {
+  *rx_ch0 = *I2S_RDR0;       // read channel 0
+  *rx_ch1 = *I2S_RDR0;       // dummy read
+  *rx_ch1 = *I2S_RDR0;       // read channel 1
+  *I2S_RCSR |= I2S_RCSR_FR;  // reset fifo
 }
 
 

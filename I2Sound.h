@@ -13,7 +13,7 @@
 
 
 
-typedef volatile uint32_t * reg;
+typedef volatile uint32_t* reg;
 
 
 
@@ -33,15 +33,19 @@ class I2Sound {
     reg I2S_RCR4;
     reg I2S_RCR5;
     reg I2S_RCSR;
+    reg I2S_RDR0;
     uint8_t IRQ_I2S_RX;
     uint8_t IRQ_I2S_TX;
+    uint32_t* rx_ch0;
+    uint32_t* rx_ch1;
   public:
     I2Sound(uint8_t newID);
     void init(uint8_t newChans, uint8_t newBits);
-    void start_rx(void (*new_rxISR)());
+    void start_rx(void (*new_rxISR)(), uint32_t* ch0, uint32_t* ch1);
     void start_tx(void (*new_txISR)());
     void stop_rx();
     void stop_tx();
+    void read();
     void (*rxISR)();
     void (*txISR)();
 };
