@@ -1,0 +1,6 @@
+init	KEYWORD2
+start_rx	KEYWORD2
+start_tx	KEYWORD2
+stop_rx	KEYWORD2
+stop_tx	KEYWORD2
+I2Sound0	KEYWORD3
