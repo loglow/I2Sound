@@ -13,7 +13,7 @@
 // ------------------------------------------------------------
 // pre-initialized class object for the I2S interface (only one)
 // ------------------------------------------------------------
-I2Sound I2Sound0(0);
+I2Sound I2S;
 
 
 
@@ -24,8 +24,8 @@ I2Sound I2Sound0(0);
 // read() populates provided memory addresses with audio data
 // ------------------------------------------------------------
 void i2s0_rx_isr() {
-  I2Sound0.read();
-  I2Sound0.rxISR();
+  I2S.read();
+  I2S.rxISR();
 }
 
 
@@ -36,32 +36,7 @@ void i2s0_rx_isr() {
 // the callback must not have any arguments and return void.
 // ------------------------------------------------------------
 void i2s0_tx_isr() {
-  I2Sound0.txISR();
-}
-
-
-
-// ------------------------------------------------------------
-// constructor, called only by the pre-defined object above.
-// sets the ID of this I2S interface instance (required) and
-// forwards the reg pointers to the appropriate registers.
-// only doing this so code might be more portable in the future
-// for similar devices that have more than one I2S interface
-// ------------------------------------------------------------
-I2Sound::I2Sound(uint8_t newID) : myID(newID) {
-  if (myID == 0) {
-    I2S_MDR = &I2S0_MDR;
-    I2S_MCR = &I2S0_MCR;
-    I2S_RCR1 = &I2S0_RCR1;
-    I2S_RCR2 = &I2S0_RCR2;
-    I2S_RCR3 = &I2S0_RCR3;
-    I2S_RCR4 = &I2S0_RCR4;
-    I2S_RCR5 = &I2S0_RCR5;
-    I2S_RCSR = &I2S0_RCSR;
-    I2S_RDR0 = &I2S0_RDR0;
-    IRQ_I2S_RX = IRQ_I2S0_RX;
-    IRQ_I2S_TX = IRQ_I2S0_TX;
-  }
+  I2S.txISR();
 }
 
 
@@ -69,12 +44,17 @@ I2Sound::I2Sound(uint8_t newID) : myID(newID) {
 // ------------------------------------------------------------
 // initialize the MCLK divider and enable clock output
 // ------------------------------------------------------------
-void I2Sound::init_mclk(uint8_t fract, uint8_t divide) {
+bool I2Sound::init_mclk() {
+  
+  uint32_t fract, divide;
+  if (nSamples == 48000) { fract = 16; divide = 125; }
+  else return false;
   
   SIM_SCGC6 |= SIM_SCGC6_I2S;                // enable clock to the I2S module
-  *I2S_MDR |= I2S_MDR_FRACT((fract - 1));    // output = input * (FRACT + 1) / (DIVIDE + 1)
-  *I2S_MDR |= I2S_MDR_DIVIDE((divide - 1));  // example: 12.288 MHz = 96 MHz * (16 / 125)
-  *I2S_MCR |= I2S_MCR_MOE;                   // enable MCLK pin as output
+  I2S0_MDR |= I2S_MDR_FRACT((fract - 1));    // output = input * (FRACT + 1) / (DIVIDE + 1)
+  I2S0_MDR |= I2S_MDR_DIVIDE((divide - 1));  // example: 12.288 MHz = 96 MHz * (16 / 125)
+  I2S0_MCR |= I2S_MCR_MOE;                   // enable MCLK pin as output
+  return true;
   
 }
 
@@ -88,12 +68,12 @@ void I2Sound::init_mclk(uint8_t fract, uint8_t divide) {
 void I2Sound::init_rx() {
   
   // SAI Receive Configuration 1 Register
-  *I2S_RCR1 =
+  I2S0_RCR1 =
     I2S_RCR1_RFW((nChans - 1))  // set FIFO watermark
   ;
   
   // SAI Receive Configuration 2 Register
-  *I2S_RCR2 =
+  I2S0_RCR2 =
     I2S_RCR2_MSEL(1)  // use MCLK as BCLK source
   | I2S_RCR2_SYNC(0)  // use asynchronous mode
   | I2S_RCR2_DIV(1)   // (DIV + 1) * 2, example: 12.288 MHz / 4 = 3.072 MHz
@@ -102,12 +82,12 @@ void I2Sound::init_rx() {
   ;
   
   // SAI Receive Configuration 3 Register
-  *I2S_RCR3 =
+  I2S0_RCR3 =
     I2S_RCR3_RCE  // enable receive channel
   ;
   
   // SAI Receive Configuration 4 Register
-  *I2S_RCR4 =
+  I2S0_RCR4 =
     I2S_RCR4_FRSZ((nChans - 1))  // frame size in words
   | I2S_RCR4_SYWD((nBits - 1))   // bit width of WCLK
   | I2S_RCR4_MF                  // MSB (most significant bit) first
@@ -116,14 +96,14 @@ void I2Sound::init_rx() {
   ;
   
   // SAI Receive Configuration 5 Register
-  *I2S_RCR5 =
+  I2S0_RCR5 =
     I2S_RCR5_W0W((nBits - 1))  // bits per word, first frame
   | I2S_RCR5_WNW((nBits - 1))  // bits per word, nth frame
   | I2S_RCR5_FBT((nBits - 1))  // index shifted for FIFO
   ;
   
   // SAI Receive Control Register
-  *I2S_RCSR =
+  I2S0_RCSR =
     I2S_RCSR_BCE   // enable the BCLK output
   | I2S_RCSR_RE    // enable receive globally
   | I2S_RCSR_FRIE  // enable FIFO request interrupt
@@ -141,15 +121,14 @@ void I2Sound::init_tx() {}
 
 
 // ------------------------------------------------------------
-// public, universal init function. needs to be passed number
-// of audio channels and bit depth. currently assumes default
-// master clock speed of 12.288 MHz (16/125 divider). it'd
-// be nice to generalize this further for other situations
+// public, universal init function. needs to be passed sample
+// rate, bit depth, and number of audio channels
 // ------------------------------------------------------------
-void I2Sound::init(uint8_t newChans, uint8_t newBits) {
-  nChans = newChans;
+bool I2Sound::begin(uint32_t newSamples, uint8_t newBits, uint8_t newChans) {
+  nSamples = newSamples;
   nBits = newBits;
-  init_mclk(16, 125);
+  nChans = newChans;
+  if(!init_mclk()) return false;
   init_rx();
   init_tx(); 
 }
@@ -163,11 +142,11 @@ void I2Sound::init(uint8_t newChans, uint8_t newBits) {
 // must take no args and return void. enables RX interrupts.
 // also passed pointers to where the audio data will be stored
 // ------------------------------------------------------------
-void I2Sound::start_rx(void (*new_rxISR)(), uint32_t* ch0, uint32_t* ch1) {
+void I2Sound::start_rx(ISR new_rxISR, uint32_t* ch0, uint32_t* ch1) {
   rxISR = new_rxISR;
   rx_ch0 = ch0;
   rx_ch1 = ch1;
-  NVIC_ENABLE_IRQ(IRQ_I2S_RX);
+  NVIC_ENABLE_IRQ(IRQ_I2S0_RX);
 }
 
 
@@ -178,9 +157,9 @@ void I2Sound::start_rx(void (*new_rxISR)(), uint32_t* ch0, uint32_t* ch1) {
 // when a TX interrupt is generated. the callback function
 // must take no args and return void. enables TX interrupts.
 // ------------------------------------------------------------
-void I2Sound::start_tx(void (*new_txISR)()) {
+void I2Sound::start_tx(ISR new_txISR) {
   txISR = new_txISR;
-  NVIC_ENABLE_IRQ(IRQ_I2S_TX);
+  NVIC_ENABLE_IRQ(IRQ_I2S0_TX);
 }
 
 
@@ -189,7 +168,7 @@ void I2Sound::start_tx(void (*new_txISR)()) {
 // stop the I2S receive process by disabling RX interrupts
 // ------------------------------------------------------------
 void I2Sound::stop_rx() {
-  NVIC_DISABLE_IRQ(IRQ_I2S_RX);
+  NVIC_DISABLE_IRQ(IRQ_I2S0_RX);
 }
 
 
@@ -198,7 +177,7 @@ void I2Sound::stop_rx() {
 // stop the I2S transmit process by disabling TX interrupts
 // ------------------------------------------------------------
 void I2Sound::stop_tx() {
-  NVIC_DISABLE_IRQ(IRQ_I2S_TX);
+  NVIC_DISABLE_IRQ(IRQ_I2S0_TX);
 }
 
 
@@ -210,10 +189,10 @@ void I2Sound::stop_tx() {
 // has been read, clear the FIFO for the next time around
 // ------------------------------------------------------------
 void I2Sound::read() {
-  *rx_ch0 = *I2S_RDR0;       // read channel 0
-  *rx_ch1 = *I2S_RDR0;       // dummy read
-  *rx_ch1 = *I2S_RDR0;       // read channel 1
-  *I2S_RCSR |= I2S_RCSR_FR;  // reset fifo
+  *rx_ch0 = I2S0_RDR0;       // read channel 0
+  *rx_ch1 = I2S0_RDR0;       // dummy read
+  *rx_ch1 = I2S0_RDR0;       // read channel 1
+  I2S0_RCSR |= I2S_RCSR_FR;  // reset fifo
 }
 
 
